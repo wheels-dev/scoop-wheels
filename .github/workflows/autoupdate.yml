@@ -1,0 +1,126 @@
+name: Autoupdate Scoop manifests
+
+# Refresh wheels.json (stable) and wheels-be.json (bleeding-edge) when the
+# upstream wheels-dev/wheels release workflow tags a new version.
+#
+# Three triggers:
+#   - repository_dispatch (wheels-released): fired by wheels-dev/wheels
+#     release.yml on every published release. ~5-7 min end-to-end from
+#     upstream tag → manifest commit here. Payload includes 'channel'
+#     so we only refresh the affected manifest.
+#   - schedule: daily cron at 08:30 UTC. Catches missed dispatches
+#     (token expiry, network blip) without waiting for the next release.
+#   - workflow_dispatch: manual one-off for debugging.
+#
+# Concurrency: serialize across all triggers. Back-to-back snapshots can
+# fire dispatches seconds apart; without serialization they fork off the
+# same base and conflict. cancel-in-progress=false because each dispatch
+# must actually bump the manifest — skipping intermediate snapshots in a
+# burst still leaves the bucket at the wrong version.
+#
+# Auth: AUTO_MERGE_PAT is a fine-grained PAT with Contents:write on this
+# repo. Used by the checkout step + the push step so the push event can
+# trigger any downstream workflows. Falls back to GITHUB_TOKEN if the
+# secret isn't set (push still works, just won't fire follow-on events).
+
+on:
+  repository_dispatch:
+    types: [wheels-released]
+  schedule:
+    - cron: '30 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scoop-autoupdate
+  cancel-in-progress: false
+
+jobs:
+  autoupdate:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout bucket
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Install Scoop
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
+          Invoke-RestMethod -Uri https://get.scoop.sh -OutFile install.ps1
+          .\install.ps1 -RunAsAdmin
+          # Make scoop visible in subsequent steps
+          $scoopShim = "$env:USERPROFILE\scoop\shims"
+          echo "$scoopShim" | Out-File -FilePath $env:GITHUB_PATH -Append
+          echo "SCOOP_HOME=$(scoop prefix scoop)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Decide which manifests to refresh
+        id: route
+        shell: pwsh
+        env:
+          DISPATCH_CHANNEL: ${{ github.event.client_payload.channel }}
+        run: |
+          # Channel from repository_dispatch routes to a single manifest.
+          # cron and workflow_dispatch refresh both.
+          $event = "${env:GITHUB_EVENT_NAME}"
+          $channel = "${env:DISPATCH_CHANNEL}"
+          $app = '*'
+          if ($event -eq 'repository_dispatch') {
+            switch ($channel) {
+              'stable'              { $app = 'wheels' }
+              'bleeding-edge'       { $app = 'wheels-be' }
+              'release-candidate'   {
+                # RCs aren't published to Scoop today. Skip cleanly so the
+                # dispatch loop in wheels release.yml can stay channel-agnostic.
+                Write-Host "RC dispatch — Scoop has no RC channel, skipping."
+                "skip=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+                exit 0
+              }
+              default {
+                # Unknown channel (or empty). Refresh both as a safe fallback.
+                Write-Host "Unknown channel '$channel' — refreshing both manifests."
+                $app = '*'
+              }
+            }
+          }
+          Write-Host "Event=$event  Channel=$channel  App=$app"
+          "app=$app"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "skip=false"  | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Run Scoop checkver + autoupdate
+        if: steps.route.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          APP: ${{ steps.route.outputs.app }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $auto = Join-Path $env:SCOOP_HOME 'bin\auto-pr.ps1'
+          if (-not (Test-Path $auto)) {
+            throw "Cannot find auto-pr.ps1 at $auto"
+          }
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # -Push commits directly to the origin branch (no PR). -Upstream
+          # is required by the script's param validator but only used in
+          # -Request mode; -Push ignores it.
+          & $auto `
+              -Push `
+              -Upstream 'wheels-dev/scoop-wheels:main' `
+              -OriginBranch 'main' `
+              -App $env:APP `
+              -Dir './bucket' `
+              -SkipUpdated
+
+      - name: Report
+        if: always()
+        shell: pwsh
+        run: |
+          git log --oneline -5
+          git status
