@@ -48,7 +48,7 @@ jobs:
           token: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Install Scoop
+      - name: Install Scoop + hub
         shell: pwsh
         run: |
           Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
@@ -58,6 +58,12 @@ jobs:
           $scoopShim = "$env:USERPROFILE\scoop\shims"
           echo "$scoopShim" | Out-File -FilePath $env:GITHUB_PATH -Append
           echo "SCOOP_HOME=$(scoop prefix scoop)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Scoop's auto-pr.ps1 hard-requires `hub` even in -Push mode — it
+          # uses hub as a wrapper around git for everything (checkout, add,
+          # commit, push). Without this install, auto-pr.ps1 exits 1 with
+          # "Please install hub 'scoop install hub'" before doing anything.
+          scoop install hub
+          hub --version
 
       - name: Decide which manifests to refresh
         id: route
