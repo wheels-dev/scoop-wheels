@@ -3,11 +3,20 @@ name: Autoupdate Scoop manifests
 # Refresh wheels.json (stable) and wheels-be.json (bleeding-edge) when the
 # upstream wheels-dev/wheels release workflow tags a new version.
 #
+# Flow (PR + auto-merge model, mirrors wheels-dev/homebrew-wheels):
+#   1. scoop checkver -Update rewrites the manifest in place (no git ops).
+#   2. If anything changed, we create a feature branch, commit, push, and
+#      open a PR via `gh pr create`.
+#   3. A synchronous wait-and-merge loop polls the PR's mergeStateStatus.
+#      Once CLEAN, we `gh pr merge --squash --delete-branch` and exit.
+#   4. The concurrency lock is held through the merge so the next queued
+#      run forks off a clean, already-bumped base.
+#
 # Three triggers:
 #   - repository_dispatch (wheels-released): fired by wheels-dev/wheels
-#     release.yml on every published release. ~5-7 min end-to-end from
-#     upstream tag → manifest commit here. Payload includes 'channel'
-#     so we only refresh the affected manifest.
+#     release.yml on every published release. End-to-end ~2-3 min from
+#     upstream tag → PR merge here. Payload includes 'channel' so we
+#     only refresh the affected manifest.
 #   - schedule: daily cron at 08:30 UTC. Catches missed dispatches
 #     (token expiry, network blip) without waiting for the next release.
 #   - workflow_dispatch: manual one-off for debugging.
@@ -18,10 +27,17 @@ name: Autoupdate Scoop manifests
 # must actually bump the manifest — skipping intermediate snapshots in a
 # burst still leaves the bucket at the wrong version.
 #
-# Auth: AUTO_MERGE_PAT is a fine-grained PAT with Contents:write on this
-# repo. Used by the checkout step + the push step so the push event can
-# trigger any downstream workflows. Falls back to GITHUB_TOKEN if the
-# secret isn't set (push still works, just won't fire follow-on events).
+# Auth: AUTO_MERGE_PAT is a fine-grained PAT with Contents:write +
+# Pull-requests:write on this repo. Used for the checkout (so the push
+# event triggers any downstream workflows), the push, the PR creation,
+# and the merge. Falls back to GITHUB_TOKEN if the secret isn't set —
+# push still works but auto-merge may be gated by the default token's
+# downstream-event restriction.
+#
+# Security note: every value from github.event.client_payload.* flows
+# through env: bindings before reaching any run script — never inlined
+# via ${{ }} interpolation in a shell command. See the security guide:
+# https://github.blog/security/vulnerability-research/how-to-catch-github-actions-workflow-injections-before-attackers-do/
 
 on:
   repository_dispatch:
@@ -32,6 +48,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: scoop-autoupdate
@@ -40,7 +57,7 @@ concurrency:
 jobs:
   autoupdate:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout bucket
         uses: actions/checkout@v4
@@ -48,22 +65,20 @@ jobs:
           token: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
-      - name: Install Scoop + hub
+      - name: Install Scoop
         shell: pwsh
         run: |
           Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force
           Invoke-RestMethod -Uri https://get.scoop.sh -OutFile install.ps1
           .\install.ps1 -RunAsAdmin
-          # Make scoop visible in subsequent steps
           $scoopShim = "$env:USERPROFILE\scoop\shims"
           echo "$scoopShim" | Out-File -FilePath $env:GITHUB_PATH -Append
           echo "SCOOP_HOME=$(scoop prefix scoop)" | Out-File -FilePath $env:GITHUB_ENV -Append
-          # Scoop's auto-pr.ps1 hard-requires `hub` even in -Push mode — it
-          # uses hub as a wrapper around git for everything (checkout, add,
-          # commit, push). Without this install, auto-pr.ps1 exits 1 with
-          # "Please install hub 'scoop install hub'" before doing anything.
-          scoop install hub
-          hub --version
+          # `hub` is no longer required — we use checkver.ps1 directly (no
+          # git ops in scoop) plus `gh` (preinstalled on the runner) for
+          # the PR + merge steps. Previous direct-push flow needed it
+          # because auto-pr.ps1 -Push wrapped git via hub; we don't call
+          # auto-pr.ps1 anymore.
 
       - name: Decide which manifests to refresh
         id: route
@@ -98,31 +113,186 @@ jobs:
           "app=$app"    | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           "skip=false"  | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-      - name: Run Scoop checkver + autoupdate
+      - name: Run Scoop checkver (update manifests in-place, no git)
         if: steps.route.outputs.skip != 'true'
         shell: pwsh
         env:
           APP: ${{ steps.route.outputs.app }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $auto = Join-Path $env:SCOOP_HOME 'bin\auto-pr.ps1'
-          if (-not (Test-Path $auto)) {
-            throw "Cannot find auto-pr.ps1 at $auto"
+          $checkver = Join-Path $env:SCOOP_HOME 'bin\checkver.ps1'
+          if (-not (Test-Path $checkver)) {
+            throw "Cannot find checkver.ps1 at $checkver"
+          }
+          # -Update writes the manifest in place if the upstream version
+          # changed; -SkipUpdated suppresses the "no update needed" lines.
+          # No git operations — the PR creation runs as a separate step
+          # below so we have full control over the branch / commit / PR
+          # metadata.
+          & $checkver -App $env:APP -Dir './bucket' -Update -SkipUpdated
+
+      - name: Detect manifest changes and compute PR metadata
+        id: changes
+        if: steps.route.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          DISPATCH_VERSION: ${{ github.event.client_payload.version }}
+          DISPATCH_CHANNEL: ${{ github.event.client_payload.channel }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $changed = (git status --porcelain ./bucket) -split "`n" | Where-Object { $_ -ne '' }
+          if (-not $changed -or $changed.Count -eq 0) {
+            Write-Host "No manifest changes detected; skipping PR."
+            "has_changes=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            exit 0
           }
 
+          Write-Host "Changes detected:"
+          $changed | ForEach-Object { Write-Host "  $_" }
+
+          $event = "${env:GITHUB_EVENT_NAME}"
+          $version = "${env:DISPATCH_VERSION}"
+          $channel = "${env:DISPATCH_CHANNEL}"
+          $runNumber = "${env:GITHUB_RUN_NUMBER}"
+
+          # Validate the version string before letting it shape a branch
+          # name or commit message — it originates from a repository_dispatch
+          # payload (untrusted). Allow only SemVer-ish characters.
+          if ($version -and $version -notmatch '^[A-Za-z0-9_.+\-]{1,64}$') {
+            Write-Warning "Rejecting suspicious version string: '$version'"
+            $version = ''
+          }
+
+          # Branch names can't contain '+' (URL-encoded as %2B and breaks
+          # `gh pr create --head`). SemVer build metadata uses '+' so we
+          # normalize to '-' for the branch only — the manifest keeps the
+          # canonical version string.
+          $safeVer = $version -replace '\+', '-'
+
+          if ($event -eq 'repository_dispatch' -and $version) {
+            if ($channel -eq 'stable') {
+              $title = "wheels: update to $version"
+              $branch = "auto-update/wheels-$safeVer"
+            } elseif ($channel -eq 'bleeding-edge') {
+              $title = "wheels-be: update to $version"
+              $branch = "auto-update/wheels-be-$safeVer"
+            } else {
+              $title = "chore: refresh manifests ($channel $version)"
+              $branch = "auto-update/run-$runNumber"
+            }
+          } else {
+            $title = "chore: scheduled manifest refresh (run $runNumber)"
+            $branch = "auto-update/cron-$runNumber"
+          }
+
+          "has_changes=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "branch=$branch"   | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "title=$title"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Branch: $branch"
+          Write-Host "Title:  $title"
+
+      - name: Create branch, commit, push, open PR
+        id: pr
+        if: steps.changes.outputs.has_changes == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.changes.outputs.branch }}
+          TITLE:  ${{ steps.changes.outputs.title }}
+        run: |
+          $ErrorActionPreference = 'Stop'
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-          # -Push commits directly to the origin branch (no PR). -Upstream
-          # is required by the script's param validator but only used in
-          # -Request mode; -Push ignores it.
-          & $auto `
-              -Push `
-              -Upstream 'wheels-dev/scoop-wheels:main' `
-              -OriginBranch 'main' `
-              -App $env:APP `
-              -Dir './bucket' `
-              -SkipUpdated
+          git checkout -b $env:BRANCH
+          git add ./bucket
+          git commit -m $env:TITLE
+          git push origin $env:BRANCH
+
+          $runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+          $eventName = "$env:GITHUB_EVENT_NAME"
+          $body = @(
+            "Auto-updated by ``scoop checkver`` from the upstream wheels-dev/wheels release.",
+            "",
+            "This PR was opened by the autoupdate.yml workflow on ``$eventName``. It will auto-merge once any required CI checks pass.",
+            "",
+            "- Triggered by: ``$eventName``",
+            "- Workflow run: $runUrl"
+          ) -join "`n"
+
+          gh pr create `
+            --base main `
+            --head $env:BRANCH `
+            --title $env:TITLE `
+            --body $body | Out-Null
+
+          # Look the PR up by branch — more reliable than parsing the URL
+          # gh pr create prints to stdout.
+          $prNumber = (gh pr list --head $env:BRANCH --base main --json number --jq '.[0].number')
+          if (-not $prNumber) {
+            throw "Could not resolve PR number for branch $env:BRANCH"
+          }
+          Write-Host "Opened PR #$prNumber"
+          "pr_number=$prNumber" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      # Synchronous wait-and-merge — mirrors wheels-dev/homebrew-wheels'
+      # auto-update.yml pattern. The reason we don't use `gh pr merge --auto`:
+      # --auto releases the workflow's concurrency lock before the merge
+      # actually commits, allowing the next queued auto-update run to fork
+      # off a stale base. Holding the slot through the merge means each
+      # subsequent run sees an already-bumped main and produces a clean PR
+      # with no conflicts.
+      #
+      # Polls every 15s, caps total wait at 10 min. CLEAN → squash-merge.
+      # BLOCKED/UNSTABLE → required check still running, keep waiting.
+      # DIRTY → unexpected (concurrency group should prevent it); fail
+      # loudly. BEHIND → upstream moved; let GitHub auto-update via --auto.
+      - name: Wait for checks and merge
+        if: steps.changes.outputs.has_changes == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_PAT || secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $MAX_WAIT = 600
+          $INTERVAL = 15
+          $elapsed  = 0
+          $state    = ''
+
+          while ($elapsed -lt $MAX_WAIT) {
+            $state = (gh pr view $env:PR_NUMBER --json mergeStateStatus --jq '.mergeStateStatus').Trim()
+            switch ($state) {
+              'CLEAN' {
+                Write-Host "PR #$env:PR_NUMBER is mergeable. Squash-merging..."
+                gh pr merge $env:PR_NUMBER --squash --delete-branch
+                Write-Host "PR #$env:PR_NUMBER merged."
+                exit 0
+              }
+              { $_ -in 'BLOCKED','UNSTABLE' } {
+                Write-Host "PR #$env:PR_NUMBER state=$state; waiting (${elapsed}s elapsed)..."
+                Start-Sleep -Seconds $INTERVAL
+                $elapsed += $INTERVAL
+              }
+              'DIRTY' {
+                Write-Error "PR #$env:PR_NUMBER is in DIRTY state — concurrency lock failed to prevent a conflict."
+                exit 1
+              }
+              'BEHIND' {
+                Write-Host "PR #$env:PR_NUMBER is BEHIND base — switching to --auto so GitHub rebases and merges."
+                gh pr merge $env:PR_NUMBER --squash --delete-branch --auto
+                exit 0
+              }
+              default {
+                Write-Host "Unknown mergeStateStatus '$state'; waiting..."
+                Start-Sleep -Seconds $INTERVAL
+                $elapsed += $INTERVAL
+              }
+            }
+          }
+
+          Write-Error "PR #$env:PR_NUMBER did not become mergeable within $MAX_WAIT seconds (last state: $state)"
+          exit 1
 
       - name: Report
         if: always()
