@@ -3,7 +3,7 @@
     "##2": "OpenJDK 21 is inlined as a 5th url/hash so `scoop install wheels` works from",
     "##3": "a fresh shell with no prerequisite buckets. Hashes for wheels-module and",
     "##4": "wheels-core are kept current by .github/workflows/autoupdate.yml.",
-    "version": "4.0.6",
+    "version": "4.1.0",
     "description": "Wheels CFML MVC framework - stable channel.",
     "homepage": "https://wheels.dev",
     "license": "Apache-2.0",
@@ -17,32 +17,36 @@
     "architecture": {
         "64bit": {
             "url": [
-                "https://github.com/wheels-dev/wheels/releases/download/v4.0.6/wheels-module-4.0.6.zip",
-                "https://github.com/wheels-dev/wheels/releases/download/v4.0.6/wheels-core-4.0.6.zip",
+                "https://github.com/wheels-dev/wheels/releases/download/v4.1.0/wheels-module-4.1.0.zip",
+                "https://github.com/wheels-dev/wheels/releases/download/v4.1.0/wheels-core-4.1.0.zip",
                 "https://github.com/cybersonic/LuCLI/releases/download/v0.3.7/lucli-0.3.7.bat",
                 "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar",
-                "https://download.java.net/java/GA/jdk21.0.2/f2283984656d49d69e91c558476027ac/13/GPL/openjdk-21.0.2_windows-x64_bin.zip"
+                "https://download.java.net/java/GA/jdk21.0.2/f2283984656d49d69e91c558476027ac/13/GPL/openjdk-21.0.2_windows-x64_bin.zip",
+                "https://github.com/wheels-dev/wheels/releases/download/v4.1.0/wheels-docs-4.1.0.zip"
             ],
             "hash": [
-                "sha512:459d601ac91e6b6f42a112dda3f3ef7e86fc3f2ae5e50173a7be0eccf4b58ba082871e3cb5c87eabbb4b73578e166070bc8b822d0fb58709d1926b8aaf677e64",
-                "sha512:2d993fadb1eaed25eabef7801e8152a5207d38e355b554f737c47f758a0759adb12e4b72ac992949f1ac04db320577db3fc50395a49cdd317f8977e791b0bb4e",
+                "sha512:f52ff41debe17c2a1c58b45babf1cbf2d1e468867b7b08a99e71bcc660d85544e4a6851fe36f7c6540fb613e97fdc8b670588f3905cd44487b9b5ee86f9f964e",
+                "sha512:a4c42700638990b187a8a7b80e85ade7ea6ff22f337454a13b1aca7d6d8e05c0568c14b0a7a3ab71a38e4da5edfc5bf18d5f17291b0b66d3d256dae4ccd239bb",
                 "54305fc79144a4346039d886c5d70660718ef4658dc8533963482e7ec74449a2",
                 "5c8609d2ca341deb8c6f71778974b5ba4995c7d32d7c7c89d9392a3e72c39291",
-                "b6c17e747ae78cdd6de4d7532b3164b277daee97c007d3eaa2b39cca99882664"
+                "b6c17e747ae78cdd6de4d7532b3164b277daee97c007d3eaa2b39cca99882664",
+                "sha512:918197caa9df89430088844f6dfa21e413a74777c23a65e64b1cb57de0109b3b741a0121bb60f8c873e7b1a30328fc0a892c6cd01067a9e6b1ecebaf78cd4393"
             ],
             "extract_dir": [
                 "",
                 "wheels",
                 "",
                 "",
-                "jdk-21.0.2"
+                "jdk-21.0.2",
+                ""
             ],
             "extract_to": [
                 "share/module",
                 "share/framework/wheels",
                 "",
                 "",
-                "share/jdk"
+                "share/jdk",
+                "share/docs"
             ]
         }
     },
@@ -124,7 +128,7 @@
         "$lines.Add('set \"ver=unknown\"')",
         "$lines.Add('if exist \"%MOD_VER_DST%\" for /f \"usebackq delims=\" %%V in (\"%MOD_VER_DST%\") do set \"ver=%%V\"')",
         "$lines.Add('if \"!ver!\"==\"unknown\" if exist \"%MOD_VER_SRC%\" for /f \"usebackq delims=\" %%V in (\"%MOD_VER_SRC%\") do set \"ver=%%V\"')",
-        "$lines.Add('echo Wheels Version: !ver! (bleeding-edge)')",
+        "$lines.Add('echo Wheels Version: !ver! (stable)')",
         "$lines.Add('echo.')",
         "$lines.Add('echo  __        ___               _ ')",
         "$lines.Add('echo  \\ \\      / / ^|__   ___  ___^| ^|___')",
@@ -139,7 +143,7 @@
         "$lines.Add('set \"ver=unknown\"')",
         "$lines.Add('if exist \"%MOD_VER_DST%\" for /f \"usebackq delims=\" %%V in (\"%MOD_VER_DST%\") do set \"ver=%%V\"')",
         "$lines.Add('if \"!ver!\"==\"unknown\" if exist \"%MOD_VER_SRC%\" for /f \"usebackq delims=\" %%V in (\"%MOD_VER_SRC%\") do set \"ver=%%V\"')",
-        "$lines.Add('echo Wheels CLI !ver! (bleeding-edge)')",
+        "$lines.Add('echo Wheels CLI !ver! (stable)')",
         "$lines.Add('echo   CFML MVC framework - code generation, migrations, testing, server management')",
         "$lines.Add('echo.')",
         "$lines.Add('echo Usage:')",
@@ -162,7 +166,7 @@
                     "https://github.com/cybersonic/LuCLI/releases/download/v0.3.7/lucli-0.3.7.bat",
                     "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar",
                     "https://download.java.net/java/GA/jdk21.0.2/f2283984656d49d69e91c558476027ac/13/GPL/openjdk-21.0.2_windows-x64_bin.zip",
-                    "https://github.com/wheels-dev/wheels-snapshots/releases/download/v$version/wheels-docs-$version.zip"
+                    "https://github.com/wheels-dev/wheels/releases/download/v$version/wheels-docs-$version.zip"
                 ],
                 "hash": [
                     {
