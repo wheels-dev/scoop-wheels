@@ -172,26 +172,10 @@ jobs:
           $manifest = Get-Content -Raw -LiteralPath $path | ConvertFrom-Json
           $urls = @($manifest.architecture.'64bit'.url)
 
-          function Get-DeclaredHash {
-            param([string]$Url, [object[]]$Hashes)
-            for ($i = 0; $i -lt $urls.Count; $i++) {
-              if ($urls[$i] -ne $Url) { continue }
-              $declared = $Hashes[$i]
-              if ($declared -is [string]) { return $declared }
-              if ($declared.url) {
-                # Autoupdate placeholder like $url.sha512 — resolve the sidecar.
-                $suffix = $declared.url -replace '^\$url', ''
-                try {
-                  return (Invoke-WebRequest -Uri "$Url$suffix" -UseBasicParsing -TimeoutSec 60).Content.Trim()
-                } catch {
-                  return $null
-                }
-              }
-              return $null
-            }
-            return $null
-          }
-
+          # NB: index-paired rather than looked up by URL. An earlier version used
+          # a helper that resolved the hash by searching $urls, but $urls was not
+          # in the helper's scope, so every lookup fell through to index 0 and the
+          # check reported a mismatch for every URL on a correct manifest.
           function Invoke-Download {
             param([string]$Url, [string]$OutFile)
             for ($attempt = 1; $attempt -le 5; $attempt++) {
@@ -207,14 +191,19 @@ jobs:
             return $false
           }
 
+          $hashEntries = @($manifest.architecture.'64bit'.hash)
           $changed = @()
-          foreach ($url in $urls) {
-            $declared = Get-DeclaredHash -Url $url -Hashes @($manifest.architecture.'64bit'.hash)
-            if (-not $declared) {
-              Write-Host "No declared hash for $url; skipping."
-              continue
+          foreach ($name in @('wheels-module-', 'wheels-core-')) {
+            $idx = -1
+            for ($i = 0; $i -lt $urls.Count; $i++) {
+              if ([System.IO.Path]::GetFileName($urls[$i]).StartsWith($name)) { $idx = $i; break }
             }
-            $declared = $declared -replace '^sha512:', '' -replace '^sha256:', ''
+            if ($idx -lt 0) { continue }
+
+            $url = $urls[$idx]
+            $declared = "$($hashEntries[$idx])" -replace '^sha512:', '' -replace '^sha256:', ''
+            $declared = $declared.Trim().ToLower()
+            if (-not $declared) { continue }
 
             $tmp = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetFileName($url))
             if (-not (Invoke-Download -Url $url -OutFile $tmp)) {
@@ -223,13 +212,24 @@ jobs:
             $actual = (Get-FileHash -LiteralPath $tmp -Algorithm SHA512).Hash.ToLower()
             Remove-Item -LiteralPath $tmp -Force
 
-            if ($actual -ne $declared.ToLower()) {
+            if ($actual -ne $declared) {
               Write-Host "Hash mismatch: $url"
               Write-Host "  declared: $($declared.Substring(0,16))..."
               Write-Host "  actual:   $($actual.Substring(0,16))..."
               $changed += [System.IO.Path]::GetFileName($url)
+            } else {
+              Write-Host "OK $([System.IO.Path]::GetFileName($url))"
             }
           }
+
+          # IMPORTANT: only the wheels-dev-owned, version-stamped artifacts are
+          # treated as re-cut evidence. `lucli-0.3.7.bat`, `sqlite-jdbc-*.jar` and
+          # the OpenJDK zip are NOT version-stamped by a wheels release — their
+          # upstreams can replace them independently of any re-cut, so a
+          # disagreement there is normal upstream drift, not a re-cut, and must
+          # not trigger a rewrite (an earlier version of this step did exactly
+          # that and opened a spurious PR). They are, however, recomputed as part
+          # of the repair when a genuine re-cut is detected.
 
           if ($changed.Count -gt 0) {
             Write-Host "Artifacts for $($manifest.version) have moved (re-cut?): $($changed -join ', ')"
@@ -267,14 +267,30 @@ jobs:
             return $false
           }
 
+          # Preserve each entry's declared algorithm. The JDK entry is sha256 and
+          # the rest are sha512; rewriting everything as sha512 would silently
+          # change the contract for that entry (an earlier cut of this step did
+          # that, though the values it wrote were still correct).
+          function Get-HashAlgorithm {
+            param([string]$Declared)
+            if ($Declared -match '^sha256:') { return 'SHA256' }
+            if ($Declared -match '^sha512:') { return 'SHA512' }
+            return 'SHA256'
+          }
+
           for ($i = 0; $i -lt $urls.Count; $i++) {
+            $algorithm = Get-HashAlgorithm -Declared "$($hashes[$i])"
             $tmp = Join-Path $env:RUNNER_TEMP ([System.IO.Path]::GetFileName($urls[$i]))
             if (-not (Invoke-Download -Url $urls[$i] -OutFile $tmp)) {
               throw "Could not download $($urls[$i]) after 5 attempts."
             }
-            $sha = (Get-FileHash -LiteralPath $tmp -Algorithm SHA512).Hash.ToLower()
+            $digest = (Get-FileHash -LiteralPath $tmp -Algorithm $algorithm).Hash.ToLower()
             Remove-Item -LiteralPath $tmp -Force
-            $hashes[$i] = "sha512:$sha"
+            if ($algorithm -eq 'SHA256') {
+              $hashes[$i] = "sha256:$digest"
+            } else {
+              $hashes[$i] = "sha512:$digest"
+            }
           }
 
           $manifest.architecture.'64bit'.hash = $hashes
