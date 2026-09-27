@@ -76,13 +76,15 @@ jobs:
           git -C $next -c user.email=smoke@example.invalid -c user.name=smoke add bucket
           git -C $next -c user.email=smoke@example.invalid -c user.name=smoke commit -q -m next
           "NEXT_BUCKET=$next" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # scoop bucket add only takes a git URL, not a bare Windows path.
+          "NEXT_BUCKET_URL=$(([System.Uri]$next).AbsoluteUri)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Fresh install of the next version
         if: matrix.mode == 'fresh'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          scoop bucket add wheels $env:NEXT_BUCKET
+          scoop bucket add wheels $env:NEXT_BUCKET_URL
           scoop install "wheels/${{ matrix.app }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -96,7 +98,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "Published install: $((scoop list ${{ matrix.app }} | Out-String).Trim())"
           scoop bucket rm wheels
-          scoop bucket add wheels $env:NEXT_BUCKET
+          scoop bucket add wheels $env:NEXT_BUCKET_URL
           scoop update "${{ matrix.app }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Write-Host "After update: $((scoop list ${{ matrix.app }} | Out-String).Trim())"
