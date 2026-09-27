@@ -131,6 +131,21 @@ jobs:
           # metadata.
           & $checkver -App $env:APP -Dir './bucket' -Update -SkipUpdated
 
+      - name: Set up Python for the shared runtime pin
+        if: steps.route.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply Wheels runtime pin to selected manifests
+        if: steps.route.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          APP: ${{ steps.route.outputs.app }}
+        run: |
+          python scripts/update-lucli.py --app "$env:APP"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Verify manifest hashes (re-cut detection)
         # scoop checkver only reacts to a version CHANGE, so a release that is
         # rebuilt under the same version number (a re-cut) leaves the manifests

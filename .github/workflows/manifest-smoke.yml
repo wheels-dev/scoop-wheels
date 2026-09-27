@@ -1,0 +1,127 @@
+name: Manifest install smoke
+
+# Proves on Windows that the manifests in THIS checkout install, and that an
+# existing install upgrades onto the pinned LuCLI runtime. The distribution
+# smoke in wheels-dev/wheels only covers the published bucket, and before
+# wheels-dev/wheels#3728 it only asserted `wheels --version`, which the wrapper
+# answers without starting LuCLI.
+#
+# The runtime moves only with a manifest version bump (scripts/update-lucli.py,
+# see its docstring), so both jobs simulate that bump on a scratch copy: the
+# version gets a ".9999" suffix and the pin is applied. The module URLs stay
+# literal, so they still resolve.
+
+on:
+  pull_request:
+    paths:
+      - 'bucket/**'
+      - 'scripts/**'
+      - '.github/workflows/manifest-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # The shared runtime pin (scripts/update-lucli.py's default).
+  PIN_URL: https://raw.githubusercontent.com/wheels-dev/wheels/develop/tools/lucli.json
+
+jobs:
+  smoke:
+    name: "${{ matrix.mode }} ${{ matrix.app }} (windows)"
+    runs-on: windows-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [wheels, wheels-be]
+        mode: [fresh, upgrade]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Scoop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
+            Invoke-RestMethod -Uri https://get.scoop.sh -OutFile install.ps1
+            .\install.ps1 -RunAsAdmin
+          }
+          "$env:USERPROFILE\scoop\shims" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Build the next-version bucket (version bump + pinned runtime)
+        shell: pwsh
+        env:
+          APP: ${{ matrix.app }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $next = Join-Path $env:RUNNER_TEMP 'next-bucket'
+          New-Item -ItemType Directory -Force -Path "$next\bucket" | Out-Null
+          Copy-Item ".\bucket\*.json" "$next\bucket\"
+          $path = "$next\bucket\$env:APP.json"
+          $raw = Get-Content $path -Raw
+          $version = ($raw | ConvertFrom-Json).version
+          $raw = $raw.Replace("""version"": ""$version""", """version"": ""$version.9999""")
+          [System.IO.File]::WriteAllText($path, $raw)
+          Invoke-WebRequest -Uri $env:PIN_URL -OutFile "$next\lucli.json" -UseBasicParsing
+          python scripts/update-lucli.py --pin "$next\lucli.json" --bucket "$next\bucket" --app $env:APP --force
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # scoop buckets are git repositories.
+          git -C $next init -q
+          git -C $next -c user.email=smoke@example.invalid -c user.name=smoke add bucket
+          git -C $next -c user.email=smoke@example.invalid -c user.name=smoke commit -q -m next
+          "NEXT_BUCKET=$next" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # scoop bucket add only takes a git URL, not a bare Windows path.
+          "NEXT_BUCKET_URL=$(([System.Uri]$next).AbsoluteUri)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Fresh install of the next version
+        if: matrix.mode == 'fresh'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          scoop bucket add wheels $env:NEXT_BUCKET_URL
+          scoop install "wheels/${{ matrix.app }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install the published version, then scoop update to the next one
+        if: matrix.mode == 'upgrade'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          scoop bucket add wheels https://github.com/wheels-dev/scoop-wheels
+          scoop install "wheels/${{ matrix.app }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "Published install: $((scoop list ${{ matrix.app }} | Out-String).Trim())"
+          scoop bucket rm wheels
+          scoop bucket add wheels $env:NEXT_BUCKET_URL
+          scoop update "${{ matrix.app }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Write-Host "After update: $((scoop list ${{ matrix.app }} | Out-String).Trim())"
+
+      - name: The installed LuCLI runtime is the pinned one, and it boots
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = (Get-Content "$env:NEXT_BUCKET\lucli.json" -Raw | ConvertFrom-Json).LUCLI_VERSION
+          $jar = "$env:USERPROFILE\scoop\apps\${{ matrix.app }}\current\lucli.jar"
+          if (-not (Test-Path $jar)) { Write-Host "::error::no lucli.jar at $jar"; exit 1 }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($jar)
+          try {
+            $entry = $zip.GetEntry('lucli/version.properties')
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            $text = $reader.ReadToEnd()
+            $reader.Close()
+          } finally { $zip.Dispose() }
+          $got = [regex]::Match($text, 'lucli\.version=([^\r\n]+)').Groups[1].Value.Trim()
+          Write-Host "Installed LuCLI runtime: '$got' (pinned '$expected')"
+          if ($got -ne $expected) { Write-Host "::error::installed LuCLI '$got', expected $expected"; exit 1 }
+          wheels --version
+          $out = (wheels info 2>&1 | Out-String)
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::wheels info exited $LASTEXITCODE (LuCLI did not start)"; exit 1 }
+          if ($out -notmatch 'Wheels CLI') { Write-Host "::error::wheels info did not reach the Wheels module through LuCLI"; exit 1 }
