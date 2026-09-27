@@ -23,9 +23,8 @@ permissions:
   contents: read
 
 env:
-  # TEMPORARY: the #3724 branch until wheels-dev/wheels#3724 merges; then
-  # develop (scripts/update-lucli.py's default). Revert before merging.
-  PIN_URL: https://raw.githubusercontent.com/wheels-dev/wheels/peter/lucli-fork-channels/tools/lucli.json
+  # The shared runtime pin (scripts/update-lucli.py's default).
+  PIN_URL: https://raw.githubusercontent.com/wheels-dev/wheels/develop/tools/lucli.json
 
 jobs:
   smoke:
