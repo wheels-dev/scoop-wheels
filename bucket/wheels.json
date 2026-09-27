@@ -19,7 +19,7 @@
       "url": [
         "https://github.com/wheels-dev/wheels/releases/download/v4.1.0/wheels-module-4.1.0.zip",
         "https://github.com/wheels-dev/wheels/releases/download/v4.1.0/wheels-core-4.1.0.zip",
-        "https://github.com/wheels-dev/LuCLI/releases/download/v0.6.2.1/lucli-0.6.2.1.jar#/lucli.jar",
+        "https://github.com/cybersonic/LuCLI/releases/download/v0.3.7/lucli-0.3.7.bat",
         "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar",
         "https://download.java.net/java/GA/jdk21.0.2/f2283984656d49d69e91c558476027ac/13/GPL/openjdk-21.0.2_windows-x64_bin.zip",
         "https://github.com/wheels-dev/wheels/releases/download/v4.1.0/wheels-docs-4.1.0.zip"
@@ -27,7 +27,7 @@
       "hash": [
         "sha512:f52ff41debe17c2a1c58b45babf1cbf2d1e468867b7b08a99e71bcc660d85544e4a6851fe36f7c6540fb613e97fdc8b670588f3905cd44487b9b5ee86f9f964e",
         "sha512:a4c42700638990b187a8a7b80e85ade7ea6ff22f337454a13b1aca7d6d8e05c0568c14b0a7a3ab71a38e4da5edfc5bf18d5f17291b0b66d3d256dae4ccd239bb",
-        "b48f1cc7794c07b82aa6eaf818c1aee26de03eacd0e08e615cda24eb58ac4499",
+        "sha512:75c948319b333d2e9d653d4986e766463f3f29062f62c364ccde2288e5f295bf65a857d54eda2e888cd5a80c2bd9fb727e016f4fca05fc42e56ee219225dd71b",
         "sha512:90b3f6aed150f611fcb9454dfda5fbb9d7faad369937fa8718ac8813c45eb6f0430e6014b7b4c94b4b63e404ade68e83126571f94216de7bf6d2947f1c642803",
         "sha512:2f7779a9dd0320c12f8eb61d8520f27efa4bdb95d7580c154ca38112ef1bbef2bb5f9f32bb30a4d9b9c1d32476e2bb6891844a92b49d1cdd35674f7508604190",
         "sha512:918197caa9df89430088844f6dfa21e413a74777c23a65e64b1cb57de0109b3b741a0121bb60f8c873e7b1a30328fc0a892c6cd01067a9e6b1ecebaf78cd4393"
@@ -121,7 +121,7 @@
     "$lines.Add('  )')",
     "$lines.Add(')')",
     "$lines.Add('')",
-    "$lines.Add('\"%JAVA_HOME%\\bin\\java.exe\" -client -Dlucli.binary.name=wheels -jar \"%~dp0lucli.jar\" %*')",
+    "$lines.Add('\"%JAVA_HOME%\\bin\\java.exe\" -client -Dlucli.binary.name=wheels -jar \"%~dp0lucli-0.3.7.bat\" %*')",
     "$lines.Add('exit /b %ERRORLEVEL%')",
     "$lines.Add('')",
     "$lines.Add(':show_version')",
@@ -163,7 +163,7 @@
         "url": [
           "https://github.com/wheels-dev/wheels/releases/download/v$version/wheels-module-$version.zip",
           "https://github.com/wheels-dev/wheels/releases/download/v$version/wheels-core-$version.zip",
-          "https://github.com/wheels-dev/LuCLI/releases/download/v0.6.2.1/lucli-0.6.2.1.jar#/lucli.jar",
+          "https://github.com/cybersonic/LuCLI/releases/download/v0.3.7/lucli-0.3.7.bat",
           "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar",
           "https://download.java.net/java/GA/jdk21.0.2/f2283984656d49d69e91c558476027ac/13/GPL/openjdk-21.0.2_windows-x64_bin.zip",
           "https://github.com/wheels-dev/wheels/releases/download/v$version/wheels-docs-$version.zip"
@@ -175,7 +175,7 @@
           {
             "url": "$url.sha512"
           },
-          "b48f1cc7794c07b82aa6eaf818c1aee26de03eacd0e08e615cda24eb58ac4499",
+          "sha512:75c948319b333d2e9d653d4986e766463f3f29062f62c364ccde2288e5f295bf65a857d54eda2e888cd5a80c2bd9fb727e016f4fca05fc42e56ee219225dd71b",
           "sha512:90b3f6aed150f611fcb9454dfda5fbb9d7faad369937fa8718ac8813c45eb6f0430e6014b7b4c94b4b63e404ade68e83126571f94216de7bf6d2947f1c642803",
           "sha256:b6c17e747ae78cdd6de4d7532b3164b277daee97c007d3eaa2b39cca99882664",
           {
