@@ -1,0 +1,75 @@
+name: Manifest install smoke
+
+# Installs each manifest from THIS checkout on Windows and runs it, so a
+# manifest change (runtime URL/hash, wrapper) is proven installable before it
+# reaches users. The distribution smoke in wheels-dev/wheels installs from the
+# published bucket and only asserts `wheels --version`, which the wrapper
+# answers without starting LuCLI; this job also runs the LuCLI runtime itself.
+
+on:
+  pull_request:
+    paths:
+      - 'bucket/**'
+      - 'scripts/**'
+      - '.github/workflows/manifest-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: "scoop install ${{ matrix.app }} (windows)"
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [wheels, wheels-be]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Scoop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) {
+            Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
+          }
+          "$env:USERPROFILE\scoop\shims" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: scoop install from this checkout's manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          scoop install ".\bucket\${{ matrix.app }}.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: The installed LuCLI runtime is the pinned one
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content ".\bucket\${{ matrix.app }}.json" -Raw | ConvertFrom-Json
+          $lucliUrl = @($manifest.architecture.'64bit'.url | Where-Object { $_ -match '/LuCLI/releases/' })[0]
+          $expected = [regex]::Match($lucliUrl, '/v([0-9.]+)/').Groups[1].Value
+          $app = "$env:USERPROFILE\scoop\apps\${{ matrix.app }}\current"
+          $java = Get-ChildItem -Path $app -Recurse -Filter java.exe | Select-Object -First 1
+          $reported = (& $java.FullName -jar "$app\lucli.jar" --version 2>&1 | Select-Object -First 1 | Out-String).Trim()
+          Write-Host "lucli.jar reports: '$reported' (pinned $expected)"
+          if ($reported -ne "LuCLI Version: $expected") {
+            Write-Host "::error::The installed LuCLI reports '$reported', expected 'LuCLI Version: $expected'"
+            exit 1
+          }
+
+      - name: wheels runs a command through LuCLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          wheels --version
+          $out = (wheels info 2>&1 | Out-String)
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::wheels info exited $LASTEXITCODE"; exit 1 }
+          if ($out -notmatch 'Wheels CLI') {
+            Write-Host "::error::wheels info did not reach the Wheels module through LuCLI"
+            exit 1
+          }
