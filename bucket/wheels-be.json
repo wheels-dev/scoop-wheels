@@ -3,7 +3,7 @@
     "##2": "OpenJDK 21 inlined as a 5th url/hash so `scoop install wheels-be` works",
     "##3": "from a fresh shell with no prerequisite buckets. Hashes for wheels-module",
     "##4": "and wheels-core are kept current by .github/workflows/autoupdate.yml. Hashes for wheels-docs are kept current by the same workflow.",
-    "version": "4.1.2-snapshot.2670",
+    "version": "4.1.2-snapshot.2671",
     "description": "Wheels CFML MVC framework - bleeding-edge channel (develop snapshots).",
     "homepage": "https://wheels.dev",
     "license": "Apache-2.0",
@@ -17,20 +17,20 @@
     "architecture": {
         "64bit": {
             "url": [
-                "https://github.com/wheels-dev/wheels-snapshots/releases/download/v4.1.2-snapshot.2670/wheels-module-4.1.2-snapshot.2670.zip",
-                "https://github.com/wheels-dev/wheels-snapshots/releases/download/v4.1.2-snapshot.2670/wheels-core-4.1.2-snapshot.2670.zip",
+                "https://github.com/wheels-dev/wheels-snapshots/releases/download/v4.1.2-snapshot.2671/wheels-module-4.1.2-snapshot.2671.zip",
+                "https://github.com/wheels-dev/wheels-snapshots/releases/download/v4.1.2-snapshot.2671/wheels-core-4.1.2-snapshot.2671.zip",
                 "https://github.com/wheels-dev/LuCLI/releases/download/v0.6.2.1/lucli-0.6.2.1.jar#/lucli.jar",
                 "https://repo1.maven.org/maven2/org/xerial/sqlite-jdbc/3.49.1.0/sqlite-jdbc-3.49.1.0.jar",
                 "https://download.java.net/java/GA/jdk21.0.2/f2283984656d49d69e91c558476027ac/13/GPL/openjdk-21.0.2_windows-x64_bin.zip",
-                "https://github.com/wheels-dev/wheels-snapshots/releases/download/v4.1.2-snapshot.2670/wheels-docs-4.1.2-snapshot.2670.zip"
+                "https://github.com/wheels-dev/wheels-snapshots/releases/download/v4.1.2-snapshot.2671/wheels-docs-4.1.2-snapshot.2671.zip"
             ],
             "hash": [
-                "sha512:165bacc6b57a8048933dfabe407550696971ea3185b9cee19d5a5d4c4f22518b058efa2b5398da4e260ddb9a6abb2fa73486349af8e89598e25bafe95a3855c4",
-                "sha512:a6a82559478221e189ac6238a38d39b6e3baaaf2ab5bfb51491323b386399a646a5d3405a8c7610979cbd0b5115be4e83bf36b32817073a3b35af9c44e921f5e",
+                "sha512:d82047eb76fca9e52168256df84f429fc6ad0a9b21c58c4d96a9616bdd9b85373ebe661dd49079c5a6fa07d510cf0561c5990f6c48dda4791c0966b7970d9bf3",
+                "sha512:e7901ff7cf532c1238433ce20c46aeb54e035d809b077a88b045d53345d8083b12581e101d210df30ee28c6ed90361409aed25d34ed3d2fc89a69d275af7b31b",
                 "b48f1cc7794c07b82aa6eaf818c1aee26de03eacd0e08e615cda24eb58ac4499",
                 "5c8609d2ca341deb8c6f71778974b5ba4995c7d32d7c7c89d9392a3e72c39291",
                 "b6c17e747ae78cdd6de4d7532b3164b277daee97c007d3eaa2b39cca99882664",
-                "sha512:4a58c971a11c1fdc7dd0f5f262e23e703dd85867591926456aff7463ec3347354b218da9e7ab367b554fc1296d05363d5118fb93c33a6bfff627a37a74f3954b"
+                "sha512:f9f4f0c82451cce177a52d085d3dd2023125f066281c6167a1aa3e07ba16e03c6e8805d91c6f9c2cdc6acd6db8ef8295a50e29030bdc95342120ad365342ec61"
             ],
             "extract_dir": [
                 "",
